@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Angry Mosquito</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Bangers', cursive;
+            background-color: #87CEEB; /* Sky Blue */
+            touch-action: none;
+        }
+        canvas {
+            background-color: #f0f0f0;
+            cursor: grab;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+        .game-title {
+            letter-spacing: 3px;
+            text-shadow: 4px 4px 0px #f0f0f0, 6px 6px 0px rgba(0,0,0,0.2);
+        }
+        #gameOverlay {
+            transition: opacity 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-4xl mx-auto relative">
+        <h1 class="text-6xl md:text-8xl text-red-600 text-center mb-4 game-title">Angry Mosquito</h1>
+
+        <div class="bg-white/50 backdrop-blur-sm p-4 rounded-xl shadow-lg text-center mb-4">
+            <p class="text-xl text-gray-800">Drag and release the mosquito to launch it at the targets!</p>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="gameOverlay" class="absolute inset-0 bg-black bg-opacity-70 flex-col items-center justify-center rounded-xl text-white text-center p-8 hidden">
+            <h2 id="overlayTitle" class="text-7xl mb-4">Game Over</h2>
+            <p id="overlayMessage" class="text-3xl mb-8">You ran out of mosquitos!</p>
+            <button id="restartButton" class="bg-green-500 hover:bg-green-600 transition-colors px-10 py-4 rounded-lg shadow-md text-4xl">Play Again</button>
+        </div>
+
+        <div class="flex justify-between items-center mt-4 text-3xl text-white w-full">
+            <div id="score" class="bg-green-500 px-6 py-2 rounded-lg shadow-md">Score: 0</div>
+            <div id="level" class="bg-blue-500 px-6 py-2 rounded-lg shadow-md">Level: 1</div>
+            <div id="mosquitos" class="bg-yellow-500 text-gray-800 px-6 py-2 rounded-lg shadow-md">Mosquitos: 5</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const levelEl = document.getElementById('level');
+        const mosquitosEl = document.getElementById('mosquitos');
+        const restartButton = document.getElementById('restartButton');
+        const gameOverlay = document.getElementById('gameOverlay');
+        const overlayTitle = document.getElementById('overlayTitle');
+        const overlayMessage = document.getElementById('overlayMessage');
+
+
+        let canvasWidth = Math.min(window.innerWidth - 30, 896);
+        let canvasHeight = canvasWidth * 0.5;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+
+        let score = 0;
+        let isDragging = false;
+        let groundHeight = 50;
+        const gravity = 0.2;
+        const launchPowerMultiplier = 0.2;
+        const maxDragDistance = 100;
+
+        let currentLevel = 1;
+        let mosquitosLeft = 0;
+        let isGameOver = false;
+
+        let mosquito = {};
+        let targets = [];
+        let obstacles = [];
+
+        const slingshot = {
+            x: 150,
+            y: canvas.height - groundHeight - 50,
+            radius: 15
+        };
+
+        let levelData = [];
+
+        function generateLevels() {
+            levelData = []; // Clear existing levels
+            const gameAreaWidth = canvas.width - slingshot.x - 150; // Area where targets/obstacles can spawn
+            const gameAreaHeight = canvas.height - groundHeight;
+
+            for (let i = 0; i < 10; i++) {
+                const level = {
+                    mosquitos: 5 - Math.floor(i / 4), // Difficulty scaling for mosquitos
+                    targets: [],
+                    obstacles: []
+                };
+
+                const numTargets = 1 + Math.floor(i / 3);
+                const numObstacles = Math.floor(i / 1.5);
+
+                let placedObjects = []; // For simple overlap detection
+
+                // Generate Targets
+                for (let j = 0; j < numTargets; j++) {
+                    let newTarget, newBox, overlaps;
+                    do {
+                        const w = 20 + Math.random() * 30;
+                        const h = 20 + Math.random() * 80;
+                        const x = -(100 + Math.random() * (gameAreaWidth - w));
+                        const y = -(h + Math.random() * (gameAreaHeight - h - 20));
+                        newTarget = { x, y, w, h, c: ['#FFC0CB', '#ADD8E6', '#90EE90'][j % 3] };
+                        
+                        // Bounding box for checking overlap
+                        newBox = { left: canvas.width + x, right: canvas.width + x + w, top: canvas.height - groundHeight + y, bottom: canvas.height - groundHeight + y + h };
+                        overlaps = placedObjects.some(obj => !(newBox.right < obj.left || newBox.left > obj.right || newBox.bottom < obj.top || newBox.top > obj.bottom));
+                    } while (overlaps);
+                    placedObjects.push(newBox);
+                    level.targets.push(newTarget);
+                }
+
+                // Generate Obstacles
+                for (let k = 0; k < numObstacles; k++) {
+                    let newObstacle, newBox, overlaps;
+                     do {
+                        const w = 20 + Math.random() * 60;
+                        const h = (Math.random() > 0.5) ? 20 : 100 + Math.random() * 100;
+                        const x = -(150 + Math.random() * (gameAreaWidth - w - 100));
+                        const y = -(h + Math.random() * (gameAreaHeight - h - 20));
+                        newObstacle = { x, y, w, h, c: '#8B4513' };
+
+                        newBox = { left: canvas.width + x, right: canvas.width + x + w, top: canvas.height - groundHeight + y, bottom: canvas.height - groundHeight + y + h };
+                        overlaps = placedObjects.some(obj => !(newBox.right < obj.left || newBox.left > obj.right || newBox.bottom < obj.top || newBox.top > obj.bottom));
+                     } while (overlaps);
+                     placedObjects.push(newBox);
+                     level.obstacles.push(newObstacle);
+                }
+                levelData.push(level);
+            }
+        }
+
+
+        function showGameOver(isWin) {
+            isGameOver = true;
+            gameOverlay.classList.remove('hidden');
+            gameOverlay.classList.add('flex');
+            gameOverlay.style.opacity = '1';
+            if (isWin) {
+                overlayTitle.textContent = "You Win!";
+                overlayMessage.textContent = `Amazing! You completed all ${levelData.length} levels!`;
+            } else {
+                overlayTitle.textContent = "Game Over";
+                overlayMessage.textContent = "You ran out of mosquitos!";
+            }
+        }
+
+        function hideGameOver() {
+            isGameOver = false;
+            gameOverlay.style.opacity = '0';
+            setTimeout(() => {
+                 gameOverlay.classList.add('hidden');
+                 gameOverlay.classList.remove('flex');
+            }, 300);
+        }
+
+        function drawMosquito(x, y, radius, isAngry) {
+            ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#000'; ctx.beginPath(); ctx.moveTo(x + radius, y); ctx.lineTo(x + radius + 15, y - 5); ctx.lineTo(x + radius + 15, y + 5); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(x + radius / 2, y - radius / 3, 4, 0, Math.PI * 2); ctx.arc(x + radius / 2, y + radius / 3, 4, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(x + radius / 2 + 1, y - radius / 3, 2, 0, Math.PI * 2); ctx.arc(x + radius / 2 + 1, y + radius / 3, 2, 0, Math.PI * 2); ctx.fill();
+            if (isAngry) { ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + radius / 3, y - radius / 2 - 2); ctx.lineTo(x + radius / 2 + 4, y - radius / 3 - 4); ctx.moveTo(x + radius / 3, y + radius / 2 + 2); ctx.lineTo(x + radius / 2 + 4, y + radius / 3 + 4); ctx.stroke(); }
+        }
+
+        function drawTrajectory() {
+            if (isDragging) {
+                const tempMosquito = { x: mosquito.x, y: mosquito.y, velocityX: (slingshot.x - mosquito.x) * launchPowerMultiplier, velocityY: (slingshot.y - mosquito.y) * launchPowerMultiplier };
+                ctx.save(); ctx.setLineDash([3, 6]); ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(tempMosquito.x, tempMosquito.y);
+                for (let i = 0; i < 100; i++) { tempMosquito.velocityY += gravity; tempMosquito.x += tempMosquito.velocityX; tempMosquito.y += tempMosquito.velocityY; ctx.lineTo(tempMosquito.x, tempMosquito.y); }
+                ctx.stroke(); ctx.restore();
+            }
+        }
+
+        function setupLevel(levelNumber) {
+            currentLevel = levelNumber;
+            const level = levelData[levelNumber - 1];
+
+            mosquitosLeft = level.mosquitos;
+            targets = (level.targets || []).map(t => ({ x: canvas.width + t.x, y: canvas.height - groundHeight + t.y, width: t.w, height: t.h, isHit: false, color: t.c }));
+            obstacles = (level.obstacles || []).map(o => ({ x: canvas.width + o.x, y: canvas.height - groundHeight + o.y, width: o.w, height: o.h, isHit: false, color: o.c }));
+            
+            levelEl.textContent = `Level: ${currentLevel}`;
+            mosquitosEl.textContent = `Mosquitos: ${mosquitosLeft}`;
+            resetMosquito(false);
+        }
+
+        function startGame() {
+            hideGameOver();
+            score = 0;
+            scoreEl.textContent = `Score: ${score}`;
+            generateLevels();
+            setupLevel(1);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 0, canvas.width, canvas.height - groundHeight);
+            ctx.fillStyle = '#228B22'; ctx.fillRect(0, canvas.height - groundHeight, canvas.width, groundHeight);
+            ctx.fillStyle = '#8B4513'; ctx.beginPath(); ctx.arc(slingshot.x, slingshot.y, slingshot.radius, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(slingshot.x - 5, slingshot.y, 10, canvas.height);
+            if (isDragging) { ctx.strokeStyle = '#5C3317'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(slingshot.x - slingshot.radius, slingshot.y); ctx.lineTo(mosquito.x, mosquito.y); ctx.lineTo(slingshot.x + slingshot.radius, slingshot.y); ctx.stroke(); }
+            drawTrajectory();
+            drawMosquito(mosquito.x, mosquito.y, mosquito.radius, true);
+            targets.forEach(target => { if (!target.isHit) { ctx.fillStyle = target.color; ctx.fillRect(target.x, target.y, target.width, target.height); } });
+            obstacles.forEach(obstacle => { if (!obstacle.isHit) { ctx.fillStyle = obstacle.color; ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height); } });
+        }
+
+        function update() {
+            // Only run game logic if the game is not over
+            if (!isGameOver) {
+                if (mosquito.isFlying) {
+                    mosquito.velocityY += gravity;
+                    mosquito.x += mosquito.velocityX;
+                    mosquito.y += mosquito.velocityY;
+
+                    if (mosquito.y - mosquito.radius > canvas.height || mosquito.x + mosquito.radius < 0 || mosquito.x - mosquito.radius > canvas.width) {
+                        resetMosquito();
+                    }
+
+                    targets.forEach(target => {
+                        if (!target.isHit && mosquito.x + mosquito.radius > target.x && mosquito.x - mosquito.radius < target.x + target.width && mosquito.y + mosquito.radius > target.y && mosquito.y - mosquito.radius < target.y + target.height) {
+                            target.isHit = true; score += 100; scoreEl.textContent = `Score: ${score}`;
+                            checkLevelComplete();
+                        }
+                    });
+
+                    obstacles.forEach(obstacle => {
+                         if (!obstacle.isHit && mosquito.x + mosquito.radius > obstacle.x && mosquito.x - mosquito.radius < obstacle.x + obstacle.width && mosquito.y + mosquito.radius > obstacle.y && mosquito.y - mosquito.radius < obstacle.y + obstacle.height) {
+                            obstacle.isHit = true; score += 50; scoreEl.textContent = `Score: ${score}`; mosquito.velocityX *= 0.5; mosquito.velocityY *= 0.5;
+                        }
+                    });
+                }
+                draw();
+            }
+            // Keep the animation loop running regardless of game state
+            requestAnimationFrame(update);
+        }
+
+        function checkLevelComplete() {
+            if (targets.every(t => t.isHit)) {
+                setTimeout(() => {
+                    if (currentLevel >= levelData.length) {
+                        showGameOver(true);
+                    } else {
+                        setupLevel(currentLevel + 1);
+                    }
+                }, 1000);
+            }
+        }
+        
+        function getPos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            if (evt.touches && evt.touches.length > 0) {
+                 return { x: evt.touches[0].clientX - rect.left, y: evt.touches[0].clientY - rect.top };
+            }
+            return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+        }
+        
+        function handleStart(e) {
+            if(isGameOver) return;
+            const pos = getPos(e);
+            const dx = pos.x - mosquito.x;
+            const dy = pos.y - mosquito.y;
+            if (Math.sqrt(dx * dx + dy * dy) < mosquito.radius * 2 && !mosquito.isFlying && mosquitosLeft > 0) {
+                isDragging = true;
+                canvas.style.cursor = 'grabbing';
+            }
+        }
+        
+        function handleMove(e) {
+            if (isDragging) {
+                const pos = getPos(e);
+                const dx = pos.x - slingshot.x;
+                const dy = pos.y - slingshot.y;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > maxDragDistance) distance = maxDragDistance;
+                const angle = Math.atan2(dy, dx);
+                mosquito.x = slingshot.x + Math.cos(angle) * distance;
+                mosquito.y = slingshot.y + Math.sin(angle) * distance;
+            }
+        }
+        
+        function handleEnd() {
+            if (isDragging) {
+                isDragging = false;
+                canvas.style.cursor = 'grab';
+                const dx = slingshot.x - mosquito.x;
+                const dy = slingshot.y - mosquito.y;
+                if (Math.sqrt(dx*dx + dy*dy) > 10) {
+                    mosquito.isFlying = true;
+                    mosquito.velocityX = dx * launchPowerMultiplier;
+                    mosquito.velocityY = dy * launchPowerMultiplier;
+                } else {
+                    resetMosquito(false);
+                }
+            }
+        }
+
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('touchstart', handleStart, { passive: false });
+        canvas.addEventListener('touchmove', handleMove, { passive: false });
+        window.addEventListener('touchend', handleEnd);
+
+        function resetMosquito(decrement = true) {
+            if (mosquito.isFlying && decrement) { // only decrement if it was a real shot
+                mosquitosLeft--;
+                mosquitosEl.textContent = `Mosquitos: ${mosquitosLeft}`;
+            }
+
+            mosquito = { x: slingshot.x, y: slingshot.y, radius: 15, velocityX: 0, velocityY: 0, isFlying: false };
+
+            if (mosquitosLeft <= 0 && !targets.every(t => t.isHit)) {
+                 setTimeout(() => showGameOver(false), 500);
+            }
+        }
+
+        restartButton.addEventListener('click', startGame);
+        
+        window.addEventListener('resize', () => {
+            canvasWidth = Math.min(window.innerWidth - 30, 896);
+            canvasHeight = canvasWidth * 0.5;
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            startGame();
+        });
+
+        startGame();
+        update();
+    </script>
+
+</body>
+</html>
+
