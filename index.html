@@ -10,7 +10,7 @@
         body {
             font-family: 'Bangers', cursive;
             background-color: #87CEEB; /* Sky Blue */
-            touch-action: none;
+            touch-action: none; /* Prevents touch actions on the whole page */
         }
         canvas {
             background-color: #f0f0f0;
@@ -275,6 +275,11 @@
         }
         
         function handleStart(e) {
+            // *** FIX FOR MOBILE ***
+            if (e.type.startsWith('touch')) {
+                e.preventDefault();
+            }
+
             if(isGameOver) return;
             const pos = getPos(e);
             const dx = pos.x - mosquito.x;
@@ -286,6 +291,11 @@
         }
         
         function handleMove(e) {
+            // *** FIX FOR MOBILE ***
+            if (e.type.startsWith('touch')) {
+                e.preventDefault();
+            }
+            
             if (isDragging) {
                 const pos = getPos(e);
                 const dx = pos.x - slingshot.x;
